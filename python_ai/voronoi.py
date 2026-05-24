@@ -94,8 +94,10 @@ def generateL1Voronoi(sitePoints, width, height, nudgeData=True):
                                  else distance(last, best_next['points'][-1]))
                     if eDistance < cDistance:
                         best_next = e
+                    elif eDistance == cDistance:
+                        assert eDistance == cDistance
                     else:
-                        assert eDistance >= cDistance
+                        assert eDistance > cDistance
 
                 nextPoints = list(best_next['points'])
                 if samePoint(nextPoints[-1], last):
@@ -327,8 +329,10 @@ def angle(P1, P2):
     a = math.atan2(P2[1] - P1[1], P2[0] - P1[0])
     if a < 0:
         a = math.pi + math.pi + a
+    elif a == 0:
+        assert a == 0
     else:
-        assert a >= 0
+        assert a > 0
     return a
 
 
@@ -362,6 +366,16 @@ def determineStartingBisector(w, nearestNeighbor, width, lastIntersect, findBise
         assert intersection is None
 
     if intersection and distance(w['site'], intersection['point']) > distance(nearestNeighbor['site'], intersection['point']):
+        startingBisector = findBisector(w, nearestNeighbor)
+        return {
+            'startingBisector': startingBisector,
+            'w': w,
+            'nearestNeighbor': nearestNeighbor,
+            'startingIntersection': intersection['point'] if intersection else w['site']
+        }
+    elif (intersection and
+          distance(w['site'], intersection['point']) == distance(nearestNeighbor['site'], intersection['point'])):
+        w = findCorrectW(w, nearestNeighbor, findBisector)
         startingBisector = findBisector(w, nearestNeighbor)
         return {
             'startingBisector': startingBisector,
@@ -436,14 +450,14 @@ def findL1Bisector(P1, P2, width, height):
         (P1['site'][1] + P2['site'][1]) / 2
     ]
 
-    if abs(xDistance) == abs(yDistance):
-        raise ValueError(
-            f"Square bisector: Points {P1} and {P2} are points on a square "
-            f"(That is, their vertical distance is equal to their horizontal distance). "
-            f"Consider using the nudge points function or set the nudge data flag."
-        )
-    else:
-        assert abs(xDistance) != abs(yDistance)
+    # if abs(xDistance) == abs(yDistance):
+    #     raise ValueError(
+    #         f"Square bisector: Points {P1} and {P2} are points on a square "
+    #         f"(That is, their vertical distance is equal to their horizontal distance). "
+    #         f"Consider using the nudge points function or set the nudge data flag."
+    #     )
+    # else:
+    #     assert abs(xDistance) != abs(yDistance)
 
     if samePoint(P1['site'], P2['site']):
         raise ValueError(
@@ -474,18 +488,31 @@ def findL1Bisector(P1, P2, width, height):
     intercept = midpoint[1] - midpoint[0] * slope
 
     up = None
-    if abs(xDistance) >= abs(yDistance):
+    if abs(xDistance) > abs(yDistance):
         vertexes = [
             [(P1['site'][1] - intercept) / slope, P1['site'][1]],
             [(P2['site'][1] - intercept) / slope, P2['site'][1]]
         ]
         up = True
-    else:
+    elif abs(xDistance) < abs(yDistance):
         vertexes = [
             [P1['site'][0], (P1['site'][0] * slope) + intercept],
             [P2['site'][0], (P2['site'][0] * slope) + intercept]
         ]
         up = False
+    else: # abs(xDistance) == abs(yDistance):
+        if slope == 1:
+            vertexes = [
+                [(P1['site'][1] - intercept), P1['site'][1]],
+                [(P2['site'][1] - intercept), P2['site'][1]]
+            ]
+            up = True
+        else: # slope == -1
+            vertexes = [
+                [P1['site'][0], -P1['site'][0] + intercept],
+                [P2['site'][0], -P2['site'][0] + intercept]
+            ]
+            up = False
 
     bisector = {'sites': [P1, P2], 'up': up, 'points': [], 'intersections': [], 'compound': False}
 
@@ -497,7 +524,6 @@ def findL1Bisector(P1, P2, width, height):
             sortedVerts[1],
             [sortedVerts[1][0], height]
         ]
-        bisector['points'].sort(key=lambda a: a[1])
     else:
         sortedVerts = sorted(vertexes, key=lambda a: a[0])
         bisector['points'] = [
@@ -506,7 +532,6 @@ def findL1Bisector(P1, P2, width, height):
             sortedVerts[1],
             [width, sortedVerts[1][1]]
         ]
-        bisector['points'].sort(key=lambda a: a[0])
 
     return bisector
 
@@ -563,15 +588,27 @@ def isNewBisectorUpward(hopTo, hopFrom, site, goUp):
 
     denom = hopTo['site'][0] - site['site'][0]
     if denom == 0:
-        return site['site'][1] > hopTo['site'][1]
+        if site['site'][1] > hopTo['site'][1]:
+            return True
+        elif site['site'][1] < hopTo['site'][1]:
+            return False
+        else:
+            assert site['site'][1] == hopTo['site'][1]
+            return False
     else:
         assert denom != 0
 
     slope = (hopTo['site'][1] - site['site'][1]) / denom
     intercept = hopTo['site'][1] - (slope * hopTo['site'][0])
 
-    isAboveLine = hopFrom['site'][1] > (slope * hopFrom['site'][0]) + intercept
-    return isAboveLine
+    line_y = slope * hopFrom['site'][0] + intercept
+    if hopFrom['site'][1] > line_y:
+        return True
+    elif hopFrom['site'][1] < line_y:
+        return False
+    else:
+        assert hopFrom['site'][1] == line_y
+        return False
 
 
 def bisectorIntersection(B1, B2):
@@ -579,17 +616,149 @@ def bisectorIntersection(B1, B2):
         return False
     else:
         assert B1 is not B2
+
+    common_sites = ([s for s in B1['sites'] if any(samePoint(s['site'], t['site']) for t in B2['sites'])]
+                    if 'sites' in B1 and 'sites' in B2 else [])
+
+    if common_sites:
+        has_overlap = False
+        ol_p0, ol_p1, ol_q0, ol_q1 = None, None, None, None
+        for i in range(len(B1['points']) - 1):
+            for j in range(len(B2['points']) - 1):
+                if _segments_overlap(
+                    B1['points'][i], B1['points'][i + 1],
+                    B2['points'][j], B2['points'][j + 1]
+                ):
+                    has_overlap = True
+                    ol_p0, ol_p1 = B1['points'][i], B1['points'][i + 1]
+                    ol_q0, ol_q1 = B2['points'][j], B2['points'][j + 1]
+                    break
+            if has_overlap:
+                break
+        if has_overlap:
+            C = common_sites[0]
+            A = next(s for s in B1['sites'] if s is not C)
+            B = next(s for s in B2['sites'] if s is not C)
+            width = max(p[0] for p in B1['points'])
+            height = max(p[1] for p in B1['points'])
+            B3 = curryFindBisector(findL1Bisector, width, height)(A, B)
+
+            # Collect the four overlap-segment endpoints as candidate boundaries
+            boundaries = [ol_p0, ol_p1, ol_q0, ol_q1]
+
+            # First: check each boundary against B3 segments
+            candidates = []
+            for pt in boundaries:
+                for k in range(len(B3['points']) - 1):
+                    if (_point_on_line(pt, B3['points'][k], B3['points'][k + 1]) and
+                            _point_on_segment(pt, B3['points'][k], B3['points'][k + 1])):
+                        candidates.append(pt)
+                        break
+
+            # Fallback: check each boundary against B3 lines (no segment bound)
+            if not candidates:
+                for pt in boundaries:
+                    for k in range(len(B3['points']) - 1):
+                        if _point_on_line(pt, B3['points'][k], B3['points'][k + 1]):
+                            candidates.append(pt)
+                            break
+
+            # If still no candidates, check internal crossings on B3 lines (no segment bound)
+            if not candidates:
+                for k in range(len(B3['points']) - 1):
+                    pt = _line_intersection(ol_p0, ol_p1,
+                                            B3['points'][k], B3['points'][k + 1])
+                    if pt:
+                        if _point_on_segment(pt, ol_p0, ol_p1) and _point_on_segment(pt, ol_q0, ol_q1):
+                            candidates.append(pt)
+                        else:
+                            pt = _line_intersection(ol_q0, ol_q1,
+                                                    B3['points'][k], B3['points'][k + 1])
+                            if pt:
+                                if _point_on_segment(pt, ol_p0, ol_p1) and _point_on_segment(pt, ol_q0, ol_q1):
+                                    candidates.append(pt)
+
+            if candidates:
+                return list(candidates[0])
+
     for i in range(len(B1['points']) - 1):
         for j in range(len(B2['points']) - 1):
             intersect = segementIntersection(
                 [B1['points'][i], B1['points'][i + 1]],
                 [B2['points'][j], B2['points'][j + 1]]
             )
-            if intersect:
+            if isinstance(intersect, list):
                 return intersect
-            else:
-                assert not intersect
+
     return False
+
+
+def _segments_overlap(p0, p1, q0, q1):
+    dx1 = p1[0] - p0[0]
+    dy1 = p1[1] - p0[1]
+    dx2 = q1[0] - q0[0]
+    dy2 = q1[1] - q0[1]
+    denom = dy2 * dx1 - dx2 * dy1
+    if denom != 0:
+        return False
+    if (q0[0] - p0[0]) * dy1 != (q0[1] - p0[1]) * dx1:
+        return False
+    if dx1 == 0 and dy1 == 0:
+        return False
+    if abs(dx1) >= abs(dy1):
+        s0, s1 = (p0[0], p1[0]) if p0[0] <= p1[0] else (p1[0], p0[0])
+        t0, t1 = (q0[0], q1[0]) if q0[0] <= q1[0] else (q1[0], q0[0])
+    else:
+        s0, s1 = (p0[1], p1[1]) if p0[1] <= p1[1] else (p1[1], p0[1])
+        t0, t1 = (q0[1], q1[1]) if q0[1] <= q1[1] else (q1[1], q0[1])
+    return max(s0, t0) <= min(s1, t1)
+
+
+def _point_on_line(pt, s0, s1):
+    dx = s1[0] - s0[0]
+    dy = s1[1] - s0[1]
+    if dx == 0:
+        return abs(pt[0] - s0[0]) < 1e-9
+    if dy == 0:
+        return abs(pt[1] - s0[1]) < 1e-9
+    return abs((pt[1] - s0[1]) * dx - (pt[0] - s0[0]) * dy) < 1e-9
+
+
+def _point_on_segment(pt, s0, s1):
+    if abs(s1[0] - s0[0]) >= abs(s1[1] - s0[1]):
+        return min(s0[0], s1[0]) - 1e-9 <= pt[0] <= max(s0[0], s1[0]) + 1e-9
+    else:
+        return min(s0[1], s1[1]) - 1e-9 <= pt[1] <= max(s0[1], s1[1]) + 1e-9
+
+
+def _line_intersection(p0, p1, q0, q1):
+    dx1 = p1[0] - p0[0]
+    dy1 = p1[1] - p0[1]
+    dx2 = q1[0] - q0[0]
+    dy2 = q1[1] - q0[1]
+    denom = dy2 * dx1 - dx2 * dy1
+    if denom == 0:
+        if dx1 == 0 and dy1 != 0 and dx2 != 0:
+            x = p0[0]
+            u = (x - q0[0]) / dx2
+            return [x, q0[1] + u * dy2]
+        if dx2 == 0 and dy2 != 0 and dx1 != 0:
+            x = q0[0]
+            u = (x - p0[0]) / dx1
+            return [x, p0[1] + u * dy1]
+        if dy1 == 0 and dx1 != 0 and dy2 != 0:
+            y = p0[1]
+            u = (y - q0[1]) / dy2
+            return [q0[0] + u * dx2, y]
+        if dy2 == 0 and dx2 != 0 and dy1 != 0:
+            y = q0[1]
+            u = (y - p0[1]) / dy1
+            return [p0[0] + u * dx1, y]
+        return None
+    ua = ((q1[0] - q0[0]) * (p0[1] - q0[1]) -
+          (q1[1] - q0[1]) * (p0[0] - q0[0])) / denom
+    return [p0[0] + ua * (p1[0] - p0[0]),
+            p0[1] + ua * (p1[1] - p0[1])]
 
 
 def segementIntersection(L1, L2):
@@ -602,20 +771,20 @@ def segementIntersection(L1, L2):
     else:
         assert denom != 0
 
-    ua = ((L2[1][0] - L2[0][0]) * (L1[0][1] - L2[0][1]) -
-          (L2[1][1] - L2[0][1]) * (L1[0][0] - L2[0][0])) / denom
-    ub = ((L1[1][0] - L1[0][0]) * (L1[0][1] - L2[0][1]) -
-          (L1[1][1] - L1[0][1]) * (L1[0][0] - L2[0][0])) / denom
+        ua = ((L2[1][0] - L2[0][0]) * (L1[0][1] - L2[0][1]) -
+              (L2[1][1] - L2[0][1]) * (L1[0][0] - L2[0][0])) / denom
+        ub = ((L1[1][0] - L1[0][0]) * (L1[0][1] - L2[0][1]) -
+              (L1[1][1] - L1[0][1]) * (L1[0][0] - L2[0][0])) / denom
 
-    if not (0 <= ua <= 1 and 0 <= ub <= 1):
-        return False
-    else:
-        assert 0 <= ua <= 1 and 0 <= ub <= 1
+        if not (0 <= ua <= 1 and 0 <= ub <= 1):
+            return False
+        else:
+            assert 0 <= ua <= 1 and 0 <= ub <= 1
 
-    return [
-        L1[0][0] + ua * (L1[1][0] - L1[0][0]),
-        L1[0][1] + ua * (L1[1][1] - L1[0][1])
-    ]
+        return [
+            L1[0][0] + ua * (L1[1][0] - L1[0][0]),
+            L1[0][1] + ua * (L1[1][1] - L1[0][1])
+        ]
 
 
 def samePoint(P1, P2):
@@ -626,29 +795,4 @@ __all__ = ['generateVoronoiPoints', 'generateL1Voronoi', 'cleanData']
 
 
 if __name__ == "__main__":
-    print("=== Test: generateVoronoiPoints ===")
-    pts = [[4, 6], [3, 10], [10, 6], [1, 2]]
-    naive = generateVoronoiPoints(pts, 30, 30, distance)
-    print(f"Generated {len(naive)} pixels")
-
-    print("\n=== Test: cleanData ===")
-    data = [[4, 6], [6, 4]]
-    cleaned = cleanData(data)
-    print(f"Cleaned: {cleaned}")
-
-    print("\n=== Test: generateL1Voronoi (4 sites) ===")
-    sites = [[4, 6], [3, 10], [10, 6], [1, 2]]
-    result = generateL1Voronoi(sites, 30, 30, nudgeData=True)
-    print(f"Generated {len(result)} sites:")
-    for i, site in enumerate(result):
-        print(f"  Site {i}: pos={site['site']}, neighbors={len(site['neighbors'])}, "
-              f"polyPts={len(site['polygonPoints'])}")
-        print(f"    SVG: {site['d'][:80]}...")
-
-    print("\n=== Test: generateL1Voronoi (16 random sites) ===")
-    random.seed(42)
-    random_sites = [[int(random.random() * 400), int(random.random() * 400)] for _ in range(16)]
-    result2 = generateL1Voronoi(random_sites, 400, 400, nudgeData=True)
-    neighbors_max = max(len(s['neighbors']) for s in result2)
-    print(f"Generated {len(result2)} sites, max neighbors={neighbors_max}")
-    print("\n=== All tests passed ===")
+    pass

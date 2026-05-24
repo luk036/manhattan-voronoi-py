@@ -1,4 +1,5 @@
 import random
+import colorsys
 import matplotlib.pyplot as plt
 from matplotlib.patches import Polygon
 from voronoi import generateL1Voronoi
@@ -6,6 +7,12 @@ from voronoi import generateL1Voronoi
 
 def random_normal(sharpness):
     return sum(random.random() for _ in range(sharpness)) / sharpness
+
+
+def get_cell_color(index, total):
+    hue = (index * 0.618033988749895) % 1.0
+    r, g, b = colorsys.hsv_to_rgb(hue, 0.5, 0.95)
+    return (r, g, b)
 
 
 def get_color(size):
@@ -26,7 +33,7 @@ def get_color(size):
 def main():
     width = 400
     height = 400
-    num_points = 10
+    num_points = 80
 
     random.seed(1)
     raw = [[int(random_normal(2) * width), int(random_normal(2) * height)] for _ in range(num_points)]
@@ -36,9 +43,10 @@ def main():
 
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 7))
 
-    for site in vector_points:
+    for i, site in enumerate(vector_points):
         poly_pts = [(x, height - y) for x, y in site['polygonPoints']]
-        poly = Polygon(poly_pts, closed=True, edgecolor='black', facecolor='white', linewidth=1)
+        poly = Polygon(poly_pts, closed=True, edgecolor='black',
+                       facecolor=get_cell_color(i, len(vector_points)), linewidth=0.5, alpha=0.8)
         ax1.add_patch(poly)
 
         ax1.plot(site['site'][0], height - site['site'][1], 'ko', markersize=3)
