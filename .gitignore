@@ -1,2 +1,4 @@
-
 node_modules/
+__pycache__/
+*.pyc
+python_ai/voronoi_demo.png
