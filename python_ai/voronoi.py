@@ -34,6 +34,8 @@ def cleanData(data):
             if i != j and abs(d[0] - e[0]) == abs(d[1] - e[1]):
                 d[0] = d[0] + 1e-10 * d[1]
                 d[1] = d[1] + 2e-10 * d[0]
+            else:
+                assert i == j or abs(d[0] - e[0]) != abs(d[1] - e[1])
     return data
 
 
@@ -41,6 +43,8 @@ def generateL1Voronoi(sitePoints, width, height, nudgeData=True):
 
     if nudgeData:
         sitePoints = cleanData(sitePoints)
+    else:
+        assert not nudgeData
 
     sitePoints.sort(key=lambda a: (a[0], a[1]))
     sites = [{'site': e, 'bisectors': []} for e in sitePoints]
@@ -70,6 +74,8 @@ def generateL1Voronoi(sitePoints, width, height, nudgeData=True):
                 startingPoints = list(startBisector['points'])
                 if isPointonEdge(startingPoints[-1]):
                     startingPoints = startingPoints[::-1]
+                else:
+                    assert not isPointonEdge(startingPoints[-1])
                 total_acc = {'points': startingPoints, 'used': [startBisector]}
             else:
                 last = total_acc['points'][-1]
@@ -78,6 +84,8 @@ def generateL1Voronoi(sitePoints, width, height, nudgeData=True):
                 for e in site['bisectors']:
                     if any(e is d for d in total_acc['used']):
                         continue
+                    else:
+                        assert all(e is not d for d in total_acc['used'])
                     eDistance = (distance(last, e['points'][0])
                                  if distance(last, e['points'][0]) < distance(last, e['points'][-1])
                                  else distance(last, e['points'][-1]))
@@ -86,10 +94,14 @@ def generateL1Voronoi(sitePoints, width, height, nudgeData=True):
                                  else distance(last, best_next['points'][-1]))
                     if eDistance < cDistance:
                         best_next = e
+                    else:
+                        assert eDistance >= cDistance
 
                 nextPoints = list(best_next['points'])
                 if samePoint(nextPoints[-1], last):
                     nextPoints = nextPoints[::-1]
+                else:
+                    assert not samePoint(nextPoints[-1], last)
 
                 total_acc = {
                     'points': total_acc['points'] + nextPoints,
@@ -116,6 +128,11 @@ def generateL1Voronoi(sitePoints, width, height, nudgeData=True):
                        for d in site['bisectors'])
             ]
             site['polygonPoints'] = poly + filteredCorners
+        else:
+            assert (len(poly) < 2 or
+                    not isPointonEdge(poly[0]) or
+                    not isPointonEdge(poly[-1]) or
+                    arePointsOnSameEdge(poly[0], poly[-1]))
 
         site['polygonPoints'].sort(key=lambda a: angle(site['site'], a))
         site['d'] = 'M ' + ' L'.join(str(x) + ' ' + str(y) for x, y in site['polygonPoints']) + ' Z'
@@ -175,6 +192,8 @@ def walkMergeLine(currentR, currentL, currentBisector, currentCropPoint, goUp, c
         currentBisector = findBisector(currentR, currentL)
         trimBisector(currentBisector, crossedBorder, currentCropPoint)
         mergeArray.append(currentBisector)
+    else:
+        assert all(e is currentR or e is currentL for e in currentBisector['sites'])
 
     cropLArray = []
     for e in currentL['bisectors']:
@@ -183,6 +202,9 @@ def walkMergeLine(currentR, currentL, currentBisector, currentCropPoint, goUp, c
         if (pt and (goUp == isNewBisectorUpward(hopTo, currentL, currentR, goUp)) and
                 (not samePoint(pt, currentCropPoint) or e is not crossedBorder)):
             cropLArray.append({'bisector': e, 'point': pt})
+        else:
+            assert not (pt and (goUp == isNewBisectorUpward(hopTo, currentL, currentR, goUp)) and
+                        (not samePoint(pt, currentCropPoint) or e is not crossedBorder))
 
     cropLArray.sort(key=lambda item: angle(currentL['site'], findHopTo(item['bisector'], currentL)['site']), reverse=True)
 
@@ -196,6 +218,10 @@ def walkMergeLine(currentR, currentL, currentBisector, currentCropPoint, goUp, c
                findHopTo(d['bisector'], currentL) is hopTo
                for d in candidates):
             filteredL.append(e)
+        else:
+            assert any(isBisectorTrapped(findHopTo(d['bisector'], currentL), newMergeLine) and
+                       findHopTo(d['bisector'], currentL) is not hopTo
+                       for d in candidates)
     cropLArray = filteredL
 
     cropRArray = []
@@ -205,6 +231,9 @@ def walkMergeLine(currentR, currentL, currentBisector, currentCropPoint, goUp, c
         if (pt and (goUp == isNewBisectorUpward(hopTo, currentR, currentL, goUp)) and
                 (not samePoint(pt, currentCropPoint) or e is not crossedBorder)):
             cropRArray.append({'bisector': e, 'point': pt})
+        else:
+            assert not (pt and (goUp == isNewBisectorUpward(hopTo, currentR, currentL, goUp)) and
+                        (not samePoint(pt, currentCropPoint) or e is not crossedBorder))
 
     cropRArray.sort(key=lambda item: angle(currentR['site'], findHopTo(item['bisector'], currentR)['site']))
 
@@ -218,6 +247,10 @@ def walkMergeLine(currentR, currentL, currentBisector, currentCropPoint, goUp, c
                findHopTo(d['bisector'], currentR) is hopTo
                for d in candidates):
             filteredR.append(e)
+        else:
+            assert any(isBisectorTrapped(findHopTo(d['bisector'], currentR), newMergeLine) and
+                       findHopTo(d['bisector'], currentR) is not hopTo
+                       for d in candidates)
     cropRArray = filteredR
 
     cropL = (cropLArray[0]
@@ -239,6 +272,8 @@ def walkMergeLine(currentR, currentL, currentBisector, currentCropPoint, goUp, c
             newMergeBisector = findBisector(hopTo, currentR)
             mergeArray.append(newMergeBisector)
             return walkMergeLine(currentR, hopTo, newMergeBisector, currentCropPoint, goUp, crossedBorder, mergeArray, findBisector)
+        else:
+            assert not leftOrphan
 
         if rightOrphan:
             for site_obj in rightOrphan['sites']:
@@ -248,8 +283,12 @@ def walkMergeLine(currentR, currentL, currentBisector, currentCropPoint, goUp, c
             newMergeBisector = findBisector(hopTo, currentL)
             mergeArray.append(newMergeBisector)
             return walkMergeLine(hopTo, currentL, newMergeBisector, currentCropPoint, goUp, crossedBorder, mergeArray, findBisector)
+        else:
+            assert not rightOrphan
 
         return mergeArray
+    else:
+        assert cropL['bisector'] or cropR['bisector']
 
     direction = determineFirstBorderCross(cropR, cropL, currentCropPoint)
     if direction == "right":
@@ -288,6 +327,8 @@ def angle(P1, P2):
     a = math.atan2(P2[1] - P1[1], P2[0] - P1[0])
     if a < 0:
         a = math.pi + math.pi + a
+    else:
+        assert a >= 0
     return a
 
 
@@ -304,6 +345,8 @@ def determineStartingBisector(w, nearestNeighbor, width, lastIntersect, findBise
 
     if lastIntersect is None:
         lastIntersect = w['site']
+    else:
+        assert lastIntersect is not None
 
     zline = {'points': [w['site'], z]}
 
@@ -313,6 +356,10 @@ def determineStartingBisector(w, nearestNeighbor, width, lastIntersect, findBise
         if pt:
             intersection = {'point': pt, 'bisector': bisector}
             break
+        else:
+            assert not pt
+    else:
+        assert intersection is None
 
     if intersection and distance(w['site'], intersection['point']) > distance(nearestNeighbor['site'], intersection['point']):
         startingBisector = findBisector(w, nearestNeighbor)
@@ -395,11 +442,15 @@ def findL1Bisector(P1, P2, width, height):
             f"(That is, their vertical distance is equal to their horizontal distance). "
             f"Consider using the nudge points function or set the nudge data flag."
         )
+    else:
+        assert abs(xDistance) != abs(yDistance)
 
     if samePoint(P1['site'], P2['site']):
         raise ValueError(
             f"Duplicate point: Points {P1} and {P2} are duplicates. please remove one"
         )
+    else:
+        assert not samePoint(P1['site'], P2['site'])
 
     if abs(xDistance) == 0:
         vertexes = [
@@ -407,6 +458,8 @@ def findL1Bisector(P1, P2, width, height):
             [width, midpoint[1]]
         ]
         return {'sites': [P1, P2], 'up': False, 'points': vertexes, 'intersections': [], 'compound': False}
+    else:
+        assert abs(xDistance) != 0
 
     if abs(yDistance) == 0:
         vertexes = [
@@ -414,6 +467,8 @@ def findL1Bisector(P1, P2, width, height):
             [midpoint[0], height]
         ]
         return {'sites': [P1, P2], 'up': True, 'points': vertexes, 'intersections': [], 'compound': False}
+    else:
+        assert abs(yDistance) != 0
 
     slope = -1 if yDistance / xDistance > 0 else 1
     intercept = midpoint[1] - midpoint[0] * slope
@@ -509,6 +564,8 @@ def isNewBisectorUpward(hopTo, hopFrom, site, goUp):
     denom = hopTo['site'][0] - site['site'][0]
     if denom == 0:
         return site['site'][1] > hopTo['site'][1]
+    else:
+        assert denom != 0
 
     slope = (hopTo['site'][1] - site['site'][1]) / denom
     intercept = hopTo['site'][1] - (slope * hopTo['site'][0])
@@ -520,6 +577,8 @@ def isNewBisectorUpward(hopTo, hopFrom, site, goUp):
 def bisectorIntersection(B1, B2):
     if B1 is B2:
         return False
+    else:
+        assert B1 is not B2
     for i in range(len(B1['points']) - 1):
         for j in range(len(B2['points']) - 1):
             intersect = segementIntersection(
@@ -528,6 +587,8 @@ def bisectorIntersection(B1, B2):
             )
             if intersect:
                 return intersect
+            else:
+                assert not intersect
     return False
 
 
@@ -538,6 +599,8 @@ def segementIntersection(L1, L2):
 
     if denom == 0:
         return None
+    else:
+        assert denom != 0
 
     ua = ((L2[1][0] - L2[0][0]) * (L1[0][1] - L2[0][1]) -
           (L2[1][1] - L2[0][1]) * (L1[0][0] - L2[0][0])) / denom
@@ -546,6 +609,8 @@ def segementIntersection(L1, L2):
 
     if not (0 <= ua <= 1 and 0 <= ub <= 1):
         return False
+    else:
+        assert 0 <= ua <= 1 and 0 <= ub <= 1
 
     return [
         L1[0][0] + ua * (L1[1][0] - L1[0][0]),

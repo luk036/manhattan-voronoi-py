@@ -26,7 +26,7 @@ def get_color(size):
 def main():
     width = 400
     height = 400
-    num_points = 64
+    num_points = 10
 
     random.seed(1)
     raw = [[int(random_normal(2) * width), int(random_normal(2) * height)] for _ in range(num_points)]
