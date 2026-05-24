@@ -41,12 +41,18 @@ def cleanData(data):
 
 def generateL1Voronoi(sitePoints, width, height, nudgeData=True):
 
-    if nudgeData:
-        sitePoints = cleanData(sitePoints)
-    else:
-        assert not nudgeData
+    # if nudgeData:
+    #     sitePoints = cleanData(sitePoints)
+    # else:
+    #     assert not nudgeData
 
     sitePoints.sort(key=lambda a: (a[0], a[1]))
+
+    unique = []
+    for p in sitePoints:
+        if not unique or not samePoint(unique[-1], p):
+            unique.append(p)
+    sitePoints = unique
     sites = [{'site': e, 'bisectors': []} for e in sitePoints]
 
     findBisector = curryFindBisector(findL1Bisector, width, height)
@@ -375,7 +381,6 @@ def determineStartingBisector(w, nearestNeighbor, width, lastIntersect, findBise
         }
     elif (intersection and
           distance(w['site'], intersection['point']) == distance(nearestNeighbor['site'], intersection['point'])):
-        w = findCorrectW(w, nearestNeighbor, findBisector)
         startingBisector = findBisector(w, nearestNeighbor)
         return {
             'startingBisector': startingBisector,
@@ -450,15 +455,6 @@ def findL1Bisector(P1, P2, width, height):
         (P1['site'][1] + P2['site'][1]) / 2
     ]
 
-    # if abs(xDistance) == abs(yDistance):
-    #     raise ValueError(
-    #         f"Square bisector: Points {P1} and {P2} are points on a square "
-    #         f"(That is, their vertical distance is equal to their horizontal distance). "
-    #         f"Consider using the nudge points function or set the nudge data flag."
-    #     )
-    # else:
-    #     assert abs(xDistance) != abs(yDistance)
-
     if samePoint(P1['site'], P2['site']):
         raise ValueError(
             f"Duplicate point: Points {P1} and {P2} are duplicates. please remove one"
@@ -494,12 +490,20 @@ def findL1Bisector(P1, P2, width, height):
             [(P2['site'][1] - intercept) / slope, P2['site'][1]]
         ]
         up = True
-    elif abs(xDistance) < abs(yDistance):
-        vertexes = [
-            [P1['site'][0], (P1['site'][0] * slope) + intercept],
-            [P2['site'][0], (P2['site'][0] * slope) + intercept]
-        ]
         up = False
+    elif abs(xDistance) == abs(yDistance): # New block for |dx| == |dy|
+        if slope == 1: # y = x + intercept, up=True (vertical-ish bisector)
+            up = True
+            vertexes = [
+                [(P1['site'][1] - intercept) / slope, P1['site'][1]],
+                [(P2['site'][1] - intercept) / slope, P2['site'][1]]
+            ]
+        else: # slope == -1, up=False (horizontal-ish bisector)
+            up = False
+            vertexes = [
+                [P1['site'][0], (P1['site'][0] * slope) + intercept],
+                [P2['site'][0], (P2['site'][0] * slope) + intercept]
+            ]
     else: # abs(xDistance) == abs(yDistance):
         if slope == 1:
             vertexes = [
@@ -533,7 +537,17 @@ def findL1Bisector(P1, P2, width, height):
             [width, sortedVerts[1][1]]
         ]
 
+    bisector['points'] = _dedup_consecutive(bisector['points'])
+
     return bisector
+
+
+def _dedup_consecutive(pts):
+    result = []
+    for pt in pts:
+        if not result or not samePoint(result[-1], pt):
+            result.append(pt)
+    return result
 
 
 def clearOutOrphans(orphanage, trapPoint):
@@ -571,17 +585,21 @@ def trimBisector(target, intersector, intersection):
                        if not any(d is e for d in target['sites']))
 
     newPoints = [p for p in target['points']
-                 if (distance(p, target['sites'][0]['site']) < distance(p, polygonSite['site']) and
-                     distance(p, target['sites'][1]['site']) < distance(p, polygonSite['site']))]
+                 if (distance(p, target['sites'][0]['site']) <= distance(p, polygonSite['site']) and
+                     distance(p, target['sites'][1]['site']) <= distance(p, polygonSite['site']))]
 
     newPoints.append(intersection)
 
+    s0 = target['sites'][0]['site']
+    s1 = target['sites'][1]['site']
     if target['up']:
-        newPoints.sort(key=lambda a: a[1])
+        ref = [(s0[0] + s1[0]) / 2, 0]
     else:
-        newPoints.sort(key=lambda a: a[0])
+        ref = [0, (s0[1] + s1[1]) / 2]
+    newPoints.sort(key=lambda a: distance(ref, a))
 
-    target['points'] = newPoints
+    if len(newPoints) >= 2:
+        target['points'] = _dedup_consecutive(newPoints)
 
 
 def isNewBisectorUpward(hopTo, hopFrom, site, goUp):
@@ -593,8 +611,7 @@ def isNewBisectorUpward(hopTo, hopFrom, site, goUp):
         elif site['site'][1] < hopTo['site'][1]:
             return False
         else:
-            assert site['site'][1] == hopTo['site'][1]
-            return False
+            return goUp
     else:
         assert denom != 0
 
@@ -607,8 +624,7 @@ def isNewBisectorUpward(hopTo, hopFrom, site, goUp):
     elif hopFrom['site'][1] < line_y:
         return False
     else:
-        assert hopFrom['site'][1] == line_y
-        return False
+        return goUp
 
 
 def bisectorIntersection(B1, B2):
@@ -643,52 +659,46 @@ def bisectorIntersection(B1, B2):
             height = max(p[1] for p in B1['points'])
             B3 = curryFindBisector(findL1Bisector, width, height)(A, B)
 
-            # Collect the four overlap-segment endpoints as candidate boundaries
-            boundaries = [ol_p0, ol_p1, ol_q0, ol_q1]
+            for k in range(len(B3['points']) - 1):
+                pt = _line_intersection(ol_p0, ol_p1,
+                                        B3['points'][k], B3['points'][k + 1])
+                if pt and _param_on_segment(pt, B3['points'][k], B3['points'][k + 1]):
+                    if _param_on_segment(pt, ol_p0, ol_p1) and _param_on_segment(pt, ol_q0, ol_q1):
+                        return list(pt)
+                pt = _line_intersection(ol_q0, ol_q1,
+                                        B3['points'][k], B3['points'][k + 1])
+                if pt and _param_on_segment(pt, B3['points'][k], B3['points'][k + 1]):
+                    if _param_on_segment(pt, ol_p0, ol_p1) and _param_on_segment(pt, ol_q0, ol_q1):
+                        return list(pt)
+            for k in range(len(B3['points']) - 1):
+                pt = _line_intersection(ol_p0, ol_p1,
+                                        B3['points'][k], B3['points'][k + 1])
+                if pt and _param_on_segment(pt, ol_p0, ol_p1) and _param_on_segment(pt, ol_q0, ol_q1):
+                    return list(pt)
+                pt = _line_intersection(ol_q0, ol_q1,
+                                        B3['points'][k], B3['points'][k + 1])
+                if pt and _param_on_segment(pt, ol_p0, ol_p1) and _param_on_segment(pt, ol_q0, ol_q1):
+                    return list(pt)
+            return list(ol_p0)
 
-            # First: check each boundary against B3 segments
-            candidates = []
-            for pt in boundaries:
-                for k in range(len(B3['points']) - 1):
-                    if (_point_on_line(pt, B3['points'][k], B3['points'][k + 1]) and
-                            _point_on_segment(pt, B3['points'][k], B3['points'][k + 1])):
-                        candidates.append(pt)
-                        break
+        for i in range(len(B1['points']) - 1):
+            for j in range(len(B2['points']) - 1):
+                intersect = segementIntersection(
+                    [B1['points'][i], B1['points'][i + 1]],
+                    [B2['points'][j], B2['points'][j + 1]]
+                )
+                if isinstance(intersect, list):
+                    return intersect
 
-            # Fallback: check each boundary against B3 lines (no segment bound)
-            if not candidates:
-                for pt in boundaries:
-                    for k in range(len(B3['points']) - 1):
-                        if _point_on_line(pt, B3['points'][k], B3['points'][k + 1]):
-                            candidates.append(pt)
-                            break
-
-            # If still no candidates, check internal crossings on B3 lines (no segment bound)
-            if not candidates:
-                for k in range(len(B3['points']) - 1):
-                    pt = _line_intersection(ol_p0, ol_p1,
-                                            B3['points'][k], B3['points'][k + 1])
-                    if pt:
-                        if _point_on_segment(pt, ol_p0, ol_p1) and _point_on_segment(pt, ol_q0, ol_q1):
-                            candidates.append(pt)
-                        else:
-                            pt = _line_intersection(ol_q0, ol_q1,
-                                                    B3['points'][k], B3['points'][k + 1])
-                            if pt:
-                                if _point_on_segment(pt, ol_p0, ol_p1) and _point_on_segment(pt, ol_q0, ol_q1):
-                                    candidates.append(pt)
-
-            if candidates:
-                return list(candidates[0])
-
-    for i in range(len(B1['points']) - 1):
-        for j in range(len(B2['points']) - 1):
-            intersect = segementIntersection(
-                [B1['points'][i], B1['points'][i + 1]],
-                [B2['points'][j], B2['points'][j + 1]]
-            )
-            if isinstance(intersect, list):
-                return intersect
+    else:
+        for i in range(len(B1['points']) - 1):
+            for j in range(len(B2['points']) - 1):
+                intersect = segementIntersection(
+                    [B1['points'][i], B1['points'][i + 1]],
+                    [B2['points'][j], B2['points'][j + 1]]
+                )
+                if isinstance(intersect, list):
+                    return intersect
 
     return False
 
@@ -705,12 +715,15 @@ def _segments_overlap(p0, p1, q0, q1):
         return False
     if dx1 == 0 and dy1 == 0:
         return False
-    if abs(dx1) >= abs(dy1):
+    if abs(dx1) > abs(dy1):
         s0, s1 = (p0[0], p1[0]) if p0[0] <= p1[0] else (p1[0], p0[0])
         t0, t1 = (q0[0], q1[0]) if q0[0] <= q1[0] else (q1[0], q0[0])
-    else:
+    elif abs(dx1) < abs(dy1):
         s0, s1 = (p0[1], p1[1]) if p0[1] <= p1[1] else (p1[1], p0[1])
         t0, t1 = (q0[1], q1[1]) if q0[1] <= q1[1] else (q1[1], q0[1])
+    else:
+        s0, s1 = (p0[0], p1[0]) if p0[0] <= p1[0] else (p1[0], p0[0])
+        t0, t1 = (q0[0], q1[0]) if q0[0] <= q1[0] else (q1[0], q0[0])
     return max(s0, t0) <= min(s1, t1)
 
 
@@ -718,17 +731,21 @@ def _point_on_line(pt, s0, s1):
     dx = s1[0] - s0[0]
     dy = s1[1] - s0[1]
     if dx == 0:
-        return abs(pt[0] - s0[0]) < 1e-9
+        return pt[0] == s0[0]
     if dy == 0:
-        return abs(pt[1] - s0[1]) < 1e-9
-    return abs((pt[1] - s0[1]) * dx - (pt[0] - s0[0]) * dy) < 1e-9
+        return pt[1] == s0[1]
+    return (pt[1] - s0[1]) * dx == (pt[0] - s0[0]) * dy
 
 
 def _point_on_segment(pt, s0, s1):
-    if abs(s1[0] - s0[0]) >= abs(s1[1] - s0[1]):
-        return min(s0[0], s1[0]) - 1e-9 <= pt[0] <= max(s0[0], s1[0]) + 1e-9
+    dx = s1[0] - s0[0]
+    dy = s1[1] - s0[1]
+    if abs(dx) > abs(dy):
+        return min(s0[0], s1[0]) <= pt[0] <= max(s0[0], s1[0])
+    elif abs(dx) < abs(dy):
+        return min(s0[1], s1[1]) <= pt[1] <= max(s0[1], s1[1])
     else:
-        return min(s0[1], s1[1]) - 1e-9 <= pt[1] <= max(s0[1], s1[1]) + 1e-9
+        return min(s0[0], s1[0]) <= pt[0] <= max(s0[0], s1[0])
 
 
 def _line_intersection(p0, p1, q0, q1):
@@ -761,6 +778,20 @@ def _line_intersection(p0, p1, q0, q1):
             p0[1] + ua * (p1[1] - p0[1])]
 
 
+def _param_on_segment(pt, s0, s1):
+    dx = s1[0] - s0[0]
+    dy = s1[1] - s0[1]
+    if dx == 0 and dy == 0:
+        return pt[0] == s0[0] and pt[1] == s0[1]
+    if abs(dx) > abs(dy):
+        t = (pt[0] - s0[0]) / dx
+    elif abs(dx) < abs(dy):
+        t = (pt[1] - s0[1]) / dy
+    else:
+        t = (pt[0] - s0[0]) / dx
+    return 0 <= t <= 1
+
+
 def segementIntersection(L1, L2):
 
     denom = ((L2[1][1] - L2[0][1]) * (L1[1][0] - L1[0][0]) -
@@ -791,7 +822,7 @@ def samePoint(P1, P2):
     return P1[0] == P2[0] and P1[1] == P2[1]
 
 
-__all__ = ['generateVoronoiPoints', 'generateL1Voronoi', 'cleanData']
+__all__ = ['generateVoronoiPoints', 'generateL1Voronoi']
 
 
 if __name__ == "__main__":
