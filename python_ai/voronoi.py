@@ -490,20 +490,12 @@ def findL1Bisector(P1, P2, width, height):
             [(P2['site'][1] - intercept) / slope, P2['site'][1]]
         ]
         up = True
+    elif abs(xDistance) < abs(yDistance):
+        vertexes = [
+            [P1['site'][0], (P1['site'][0] * slope) + intercept],
+            [P2['site'][0], (P2['site'][0] * slope) + intercept]
+        ]
         up = False
-    elif abs(xDistance) == abs(yDistance): # New block for |dx| == |dy|
-        if slope == 1: # y = x + intercept, up=True (vertical-ish bisector)
-            up = True
-            vertexes = [
-                [(P1['site'][1] - intercept) / slope, P1['site'][1]],
-                [(P2['site'][1] - intercept) / slope, P2['site'][1]]
-            ]
-        else: # slope == -1, up=False (horizontal-ish bisector)
-            up = False
-            vertexes = [
-                [P1['site'][0], (P1['site'][0] * slope) + intercept],
-                [P2['site'][0], (P2['site'][0] * slope) + intercept]
-            ]
     else: # abs(xDistance) == abs(yDistance):
         if slope == 1:
             vertexes = [
